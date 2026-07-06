@@ -548,8 +548,8 @@ document.getElementById('send').onclick = async () => {
 load().catch(err => status.textContent = String(err));
 const events = new EventSource('/api/events?token=' + encodeURIComponent(token));
 events.addEventListener('messages', event => applyState(JSON.parse(event.data)));
-events.onerror = () => setTimeout(() => load().catch(err => status.textContent = String(err)), 500);
-setInterval(() => load().catch(err => status.textContent = String(err)), 500);
+events.onerror = () => setTimeout(() => load().catch(err => status.textContent = String(err)), 1000);
+setInterval(() => load().catch(err => status.textContent = String(err)), 5000);
 </script>
 </body>
 </html>`;
