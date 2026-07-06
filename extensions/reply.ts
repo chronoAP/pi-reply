@@ -449,15 +449,34 @@ function renderQuotes(focusIndex) {
     box?.scrollIntoView({ block: 'center' });
   });
 }
-let lastRendered = '';
+const rendered = new Map();
+function messageSig(m) { return JSON.stringify([m.role, m.text, m.label, m.toolTitle, m.toolDiff, m.thinking]); }
+function htmlForMessage(m) {
+  const sig = messageSig(m);
+  const cached = rendered.get(m.id);
+  if (cached?.sig === sig) return cached.html;
+  const html = renderMessage(m);
+  rendered.set(m.id, { sig, html });
+  return html;
+}
 function renderMessages(messages) {
   const atBottom = chat.scrollHeight - chat.scrollTop - chat.clientHeight < 80;
   const openIds = new Set([...chat.querySelectorAll('details[data-id][open]')].map(el => el.dataset.id));
-  const html = messages.map(renderMessage).join('');
-  if (html === lastRendered) return;
-  lastRendered = html;
-  chat.innerHTML = html;
-  openIds.forEach(id => chat.querySelector('details[data-id="' + CSS.escape(id) + '"]')?.setAttribute('open', ''));
+  const keepIds = new Set(messages.map(m => m.id));
+  for (const id of rendered.keys()) if (!keepIds.has(id)) rendered.delete(id);
+  messages.forEach((m, i) => {
+    const html = htmlForMessage(m);
+    const current = chat.children[i];
+    if (current?.dataset?.id === m.id && current.dataset.sig === rendered.get(m.id).sig) return;
+    const template = document.createElement('template');
+    template.innerHTML = html;
+    const next = template.content.firstElementChild;
+    next.dataset.id = m.id;
+    next.dataset.sig = rendered.get(m.id).sig;
+    if (openIds.has(m.id) && next.tagName === 'DETAILS') next.setAttribute('open', '');
+    current ? current.replaceWith(next) : chat.appendChild(next);
+  });
+  while (chat.children.length > messages.length) chat.lastElementChild.remove();
   requestAnimationFrame(() => { if (atBottom) chat.scrollTop = chat.scrollHeight; });
 }
 async function load() {
