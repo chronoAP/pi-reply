@@ -1,16 +1,22 @@
 # Pi Reply
 
-Browser quote/reply pane for [Pi](https://pi.dev) chats.
+Pi Reply adds a browser-based reply workspace for [Pi](https://pi.dev) chats, making it easier to respond to specific parts of long agent conversations.
+
+Instead of typing a vague follow-up, you can highlight exact text from the chat, collect multiple quotes, write targeted replies for each one, and send them back to Pi as a structured response. This is especially useful for correcting mistakes, steering ongoing work, reviewing tool output, or replying to several points in one turn.
 
 ## Features
 
-- Open with `/reply`.
-- Select text in the browser chat view and click **Add quote**.
-- Draft multiple `LLM:` / `User:` quote replies.
-- Send with **Reply** or `Ctrl+Enter`.
-- Sends as steering while the agent is busy, or as a normal user message when idle.
-- Live browser updates via SSE.
-- Tool results are quoteable and collapsed by default.
+- Open with `/reply`
+- Browser chat view with selectable text
+- Floating **Add quote** button near your selection
+- Multiple quote/reply pairs in one message
+- Clear `LLM:` / `User:` formatting
+- Sends as steering while the agent is working
+- Quotes tool results, including edit diffs
+- Collapsed user/tool messages by default
+- Live chat updates via browser stream
+- Tab title follows the current conversation
+- `Ctrl+Enter` to send all replies
 
 ## Install
 
