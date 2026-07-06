@@ -19,7 +19,7 @@ let broadcastTimer: ReturnType<typeof setTimeout> | undefined;
 const editDiffCache = new Map<string, string>();
 const eventClients = new Set<ServerResponse>();
 
-type ChatMessage = { id: string; role: string; text: string; label?: string; toolTitle?: string; toolDiff?: string; thinking?: string };
+type ChatMessage = { id: string; role: string; text: string; label?: string; toolTitle?: string; toolDiff?: string; thinking?: string; toolCalls?: ToolCall[] };
 type ToolCall = { name?: string; arguments?: Record<string, any> };
 
 function textFromContent(content: unknown): string {
@@ -49,6 +49,15 @@ function thinkingFromContent(content: unknown): string {
 		})
 		.filter(Boolean)
 		.join("\n");
+}
+
+function toolCallsFromContent(content: unknown): ToolCall[] {
+	if (!Array.isArray(content)) return [];
+	return content.flatMap((part) => {
+		if (!part || typeof part !== "object" || !("type" in part)) return [];
+		const call = part as { type?: string; name?: string; arguments?: Record<string, any> };
+		return call.type === "toolCall" ? [{ name: call.name, arguments: call.arguments ?? {} }] : [];
+	});
 }
 
 function shortPath(value: unknown): string {
@@ -116,6 +125,7 @@ function chatMessageFromAgentMessage(message: { role?: string; content?: unknown
 		text: textFromContent(message.content),
 		label,
 		thinking: thinkingFromContent(message.content),
+		toolCalls: toolCallsFromContent(message.content),
 	};
 }
 
@@ -144,7 +154,7 @@ function rebuildMessages(ctx: ExtensionCommandContext): ChatMessage[] {
 				toolDiff: name === "edit" ? editDiff(args, ctx.cwd) : undefined,
 			};
 		})
-		.filter((message) => message.text.trim() || message.thinking?.trim() || message.toolDiff?.trim());
+		.filter((message) => message.text.trim() || message.thinking?.trim() || message.toolDiff?.trim() || message.toolCalls?.length);
 }
 
 function conversationTitle(ctx: ExtensionCommandContext): string {
@@ -167,7 +177,7 @@ function getMessages(ctx: ExtensionCommandContext): ChatMessage[] {
 	if (liveMessage) {
 		const live = chatMessageFromAgentMessage(liveMessage, "__live");
 		const last = messages.at(-1);
-		if ((live.text.trim() || live.thinking?.trim()) && (!last || last.role !== live.role || last.text !== live.text)) messages.push(live);
+		if ((live.text.trim() || live.thinking?.trim() || live.toolCalls?.length) && (!last || last.role !== live.role || last.text !== live.text)) messages.push(live);
 	}
 	return messages;
 }
@@ -441,6 +451,12 @@ function renderDiff(diff) {
 function renderThinking(m) {
   return m.thinking ? '<details class="thinking"><summary>thinking</summary><div class="md">' + md(m.thinking) + '</div></details>' : '';
 }
+function renderToolCalls(m) {
+  return (m.toolCalls || []).map((call, i) => {
+    const args = call.arguments && Object.keys(call.arguments).length ? '<pre>' + esc(JSON.stringify(call.arguments, null, 2)) + '</pre>' : '';
+    return '<details class="msg toolResult" data-id="' + esc(m.id + '-call-' + i) + '"><summary>calling ' + esc(call.name || 'tool') + '</summary>' + args + '</details>';
+  }).join('');
+}
 function renderMessage(m) {
   const title = esc(m.role) + (m.label ? ' · ' + esc(m.label) : '');
   const firstLine = esc(String(m.text || '').trim().split(/\r?\n/)[0]?.slice(0, 90) || '(empty)');
@@ -449,7 +465,7 @@ function renderMessage(m) {
     return '<details class="msg ' + esc(m.role) + '" data-id="' + esc(m.id) + '"><summary>' + esc(m.toolTitle || 'tool output') + '</summary>' + body + '</details>'; 
   }
   if (m.role === 'user') return '<details class="msg user" data-id="' + esc(m.id) + '"><summary>' + title + ' · ' + firstLine + '</summary><div class="md">' + md(m.text) + '</div></details>';
-  return '<section class="msg ' + esc(m.role) + '"><div class="role">' + title + '</div>' + renderThinking(m) + '<div class="md">' + md(m.text) + '</div></section>';
+  return '<section class="msg ' + esc(m.role) + '"><div class="role">' + title + '</div>' + renderThinking(m) + '<div class="md">' + md(m.text) + '</div>' + renderToolCalls(m) + '</section>'; 
 }
 function renderQuotes(focusIndex) {
   quotes.innerHTML = items.length
@@ -465,7 +481,7 @@ function renderQuotes(focusIndex) {
   });
 }
 const rendered = new Map();
-function messageSig(m) { return JSON.stringify([m.role, m.text, m.label, m.toolTitle, m.toolDiff, m.thinking]); }
+function messageSig(m) { return JSON.stringify([m.role, m.text, m.label, m.toolTitle, m.toolDiff, m.thinking, m.toolCalls]); }
 function htmlForMessage(m) {
   const sig = messageSig(m);
   const cached = rendered.get(m.id);
