@@ -19,7 +19,7 @@ let broadcastTimer: ReturnType<typeof setTimeout> | undefined;
 const editDiffCache = new Map<string, string>();
 const eventClients = new Set<ServerResponse>();
 
-type ChatMessage = { id: string; role: string; text: string; label?: string; toolTitle?: string; toolDiff?: string; thinking?: string; toolCalls?: ToolCall[] };
+type ChatMessage = { id: string; role: string; text: string; label?: string; toolTitle?: string; toolDiff?: string; thinking?: string; toolCalls?: ToolCall[]; live?: boolean };
 type ToolCall = { name?: string; arguments?: Record<string, any> };
 
 function textFromContent(content: unknown): string {
@@ -175,7 +175,7 @@ function getMessages(ctx: ExtensionCommandContext): ChatMessage[] {
 	}
 	const messages = [...cachedMessages];
 	if (liveMessage) {
-		const live = chatMessageFromAgentMessage(liveMessage, "__live");
+		const live = { ...chatMessageFromAgentMessage(liveMessage, "__live"), live: true };
 		const last = messages.at(-1);
 		if ((live.text.trim() || live.thinking?.trim() || live.toolCalls?.length) && (!last || last.role !== live.role || last.text !== live.text)) messages.push(live);
 	}
@@ -449,7 +449,9 @@ function renderDiff(diff) {
   }).join('') + '</div>';
 }
 function renderThinking(m) {
-  return m.thinking ? '<details class="thinking"><summary>thinking</summary><div class="md">' + md(m.thinking) + '</div></details>' : '';
+  if (!m.thinking) return '';
+  if (m.live) return '<details class="thinking"><summary>thinking</summary><pre>' + esc(m.thinking) + '</pre></details>';
+  return '<details class="thinking"><summary>thinking</summary><div class="md">' + md(m.thinking) + '</div></details>';
 }
 function renderToolCalls(m) {
   return (m.toolCalls || []).map((call, i) => {
@@ -481,7 +483,14 @@ function renderQuotes(focusIndex) {
   });
 }
 const rendered = new Map();
-function messageSig(m) { return JSON.stringify([m.role, m.text, m.label, m.toolTitle, m.toolDiff, m.thinking, m.toolCalls]); }
+let pendingState;
+let focusedRenderTimer;
+let lastFocusedRender = 0;
+function isReplyFocused() {
+  const el = document.activeElement;
+  return el && el.tagName === 'TEXTAREA' && (el.id === 'note' || quotes.contains(el));
+}
+function messageSig(m) { return JSON.stringify([m.role, m.text, m.label, m.toolTitle, m.toolDiff, m.thinking, m.toolCalls, m.live]); }
 function htmlForMessage(m) {
   const sig = messageSig(m);
   const cached = rendered.get(m.id);
@@ -510,10 +519,25 @@ function renderMessages(messages) {
   while (chat.children.length > messages.length) chat.lastElementChild.remove();
   requestAnimationFrame(() => { if (atBottom) chat.scrollTop = chat.scrollHeight; });
 }
-function applyState(data) {
+function renderState(data) {
   if (data.title) document.title = data.title;
   setWorking(Boolean(data.working));
   renderMessages(data.messages || []);
+}
+function flushPendingState() {
+  clearTimeout(focusedRenderTimer);
+  focusedRenderTimer = undefined;
+  if (!pendingState) return;
+  const data = pendingState;
+  pendingState = undefined;
+  lastFocusedRender = performance.now();
+  renderState(data);
+}
+function applyState(data) {
+  if (!isReplyFocused()) { pendingState = undefined; renderState(data); return; }
+  pendingState = data;
+  const wait = Math.max(0, 500 - (performance.now() - lastFocusedRender));
+  if (!focusedRenderTimer) focusedRenderTimer = setTimeout(flushPendingState, wait);
 }
 async function load() {
   const res = await fetch('/api/messages?token=' + encodeURIComponent(token));
@@ -538,6 +562,7 @@ document.addEventListener('selectionchange', () => {
 });
 document.getElementById('refresh').onclick = load;
 document.getElementById('note').oninput = updateSendState;
+document.addEventListener('focusout', () => setTimeout(() => { if (!isReplyFocused()) flushPendingState(); }, 0));
 document.getElementById('clear').onclick = () => { items = []; document.getElementById('note').value = ''; renderQuotes(); };
 document.addEventListener('keydown', event => {
   if (event.key === 'Enter' && event.ctrlKey) {
