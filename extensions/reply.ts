@@ -515,9 +515,9 @@ function updateJumpButton() {
   jumpNew.style.display = unreadId ? 'block' : 'none';
 }
 function renderMessages(messages) {
-  const atBottom = isAtBottom();
+  const firstRender = chat.children.length === 0;
   const newestId = messages.at(-1)?.id;
-  if (!atBottom && seenLastId && newestId && newestId !== seenLastId) unreadId = newestId;
+  if (!firstRender && seenLastId && newestId && newestId !== seenLastId) unreadId = newestId;
   const openIds = new Set([...chat.querySelectorAll('details[data-id][open]')].map(el => el.dataset.id));
   const keepIds = new Set(messages.map(m => m.id));
   for (const id of rendered.keys()) if (!keepIds.has(id)) rendered.delete(id);
@@ -535,8 +535,10 @@ function renderMessages(messages) {
   });
   while (chat.children.length > messages.length) chat.lastElementChild.remove();
   requestAnimationFrame(() => {
-    if (atBottom) chat.scrollTop = chat.scrollHeight;
-    if (atBottom) seenLastId = newestId || seenLastId;
+    if (firstRender) {
+      chat.scrollTop = chat.scrollHeight;
+      seenLastId = newestId || seenLastId;
+    }
     updateJumpButton();
   });
 }
