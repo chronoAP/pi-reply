@@ -212,7 +212,7 @@ function formatQuoteReply(items: Array<{ quote: string; reply: string }>, note: 
 		if (!reply) continue;
 		const lines: string[] = [];
 		if (quote) lines.push("LLM:", quote.split(/\r?\n/).map((line) => `> ${line}`).join("\n"), "");
-		lines.push("User:", reply);
+		lines.push(reply);
 		blocks.push(lines.join("\n").trim());
 	}
 	if (note.trim()) blocks.push(note.trim());
