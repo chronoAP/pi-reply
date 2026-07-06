@@ -1,0 +1,30 @@
+{
+  "name": "pi-reply",
+  "version": "0.1.0",
+  "description": "Browser quote/reply pane for Pi chats",
+  "type": "module",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "pi",
+    "reply",
+    "quote"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chronoAP/pi-reply.git"
+  },
+  "bugs": {
+    "url": "https://github.com/chronoAP/pi-reply/issues"
+  },
+  "homepage": "https://github.com/chronoAP/pi-reply#readme",
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions"
+    ]
+  }
+}
