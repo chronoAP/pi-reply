@@ -348,7 +348,7 @@ function appHtml() {
 body { margin: 0; display: grid; grid-template-columns: minmax(0, 1fr) 420px; height: 100vh; background: var(--page-bg); }
 main { overflow-y: auto; overflow-x: hidden; padding: 14px; background: var(--pane-bg); min-width: 0; }
 aside { padding: 14px; overflow: auto; background: var(--panel-bg); }
-.msg { width: 100%; box-sizing: border-box; margin: 0 0 10px; padding: 10px; border-radius: 0; border: 0; line-height: 1.35; overflow-wrap: anywhere; }
+.msg { width: 100%; box-sizing: border-box; margin: 0 0 10px; padding: 10px; border-radius: 0; border: 0; line-height: 1.35; overflow-wrap: anywhere; content-visibility: auto; contain-intrinsic-size: 1px 160px; }
 .assistant { background: transparent; }
 .user { background: var(--user-bg); color: var(--text); }
 .toolResult { background: var(--tool-success-bg); }
@@ -423,7 +423,7 @@ function setWorking(on) {
   spinnerTimer = setInterval(() => {
     spinnerIndex = (spinnerIndex + 1) % spinnerFrames.length;
     workingFrame.textContent = spinnerFrames[spinnerIndex];
-  }, 80);
+  }, 250);
 }
 function esc(s) { return String(s || '').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
 function md(s) {
@@ -484,8 +484,6 @@ function renderQuotes(focusIndex) {
 }
 const rendered = new Map();
 let pendingState;
-let focusedRenderTimer;
-let lastFocusedRender = 0;
 function isReplyFocused() {
   const el = document.activeElement;
   return el && el.tagName === 'TEXTAREA' && (el.id === 'note' || quotes.contains(el));
@@ -525,23 +523,18 @@ function renderState(data) {
   renderMessages(data.messages || []);
 }
 function flushPendingState() {
-  clearTimeout(focusedRenderTimer);
-  focusedRenderTimer = undefined;
   if (!pendingState) return;
   const data = pendingState;
   pendingState = undefined;
-  lastFocusedRender = performance.now();
   renderState(data);
 }
-function applyState(data) {
-  if (!isReplyFocused()) { pendingState = undefined; renderState(data); return; }
+function applyState(data, force) {
+  if (force || !isReplyFocused()) { pendingState = undefined; renderState(data); return; }
   pendingState = data;
-  const wait = Math.max(0, 500 - (performance.now() - lastFocusedRender));
-  if (!focusedRenderTimer) focusedRenderTimer = setTimeout(flushPendingState, wait);
 }
-async function load() {
+async function load(force) {
   const res = await fetch('/api/messages?token=' + encodeURIComponent(token));
-  applyState(await res.json());
+  applyState(await res.json(), force);
 }
 function addSelection() {
   const quote = String(getSelection()).trim();
@@ -552,15 +545,20 @@ function addSelection() {
   status.textContent = 'Added quote.';
 }
 addPop.onclick = addSelection;
-document.addEventListener('selectionchange', () => {
+function updateAddButton() {
   const sel = getSelection();
   if (!sel || sel.isCollapsed || !chat.contains(sel.anchorNode)) { addPop.style.display = 'none'; return; }
   const rect = sel.getRangeAt(0).getBoundingClientRect();
   addPop.style.left = Math.min(rect.right + 8, innerWidth - 120) + 'px';
   addPop.style.top = Math.max(rect.top - 4, 8) + 'px';
   addPop.style.display = 'block';
+}
+chat.addEventListener('mouseup', () => requestAnimationFrame(updateAddButton));
+chat.addEventListener('keyup', event => {
+  if (event.key.startsWith('Arrow') || event.key === 'Shift') requestAnimationFrame(updateAddButton);
 });
-document.getElementById('refresh').onclick = load;
+document.addEventListener('mousedown', event => { if (!chat.contains(event.target) && event.target !== addPop) addPop.style.display = 'none'; });
+document.getElementById('refresh').onclick = () => load(true);
 document.getElementById('note').oninput = updateSendState;
 document.addEventListener('focusout', () => setTimeout(() => { if (!isReplyFocused()) flushPendingState(); }, 0));
 document.getElementById('clear').onclick = () => { items = []; document.getElementById('note').value = ''; renderQuotes(); };
@@ -572,6 +570,7 @@ document.addEventListener('keydown', event => {
 });
 document.getElementById('send').onclick = async () => {
   if (sendButton.disabled) return;
+  flushPendingState();
   const note = document.getElementById('note').value;
   const cleanItems = items.filter(item => String(item.reply || '').trim());
   const payload = { items: cleanItems, note };
@@ -586,7 +585,7 @@ document.getElementById('send').onclick = async () => {
     renderQuotes();
   }
 };
-load().catch(err => status.textContent = String(err));
+load(true).catch(err => status.textContent = String(err));
 const events = new EventSource('/api/events?token=' + encodeURIComponent(token));
 events.addEventListener('messages', event => applyState(JSON.parse(event.data)));
 events.onerror = () => setTimeout(() => load().catch(err => status.textContent = String(err)), 1000);
