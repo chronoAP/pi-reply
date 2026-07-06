@@ -534,8 +534,8 @@ events.addEventListener('messages', event => {
   setWorking(Boolean(data.working));
   renderMessages(data.messages || []);
 });
-events.onerror = () => setTimeout(() => load().catch(err => status.textContent = String(err)), 1000);
-setInterval(() => load().catch(err => status.textContent = String(err)), 5000);
+events.onerror = () => setTimeout(() => load().catch(err => status.textContent = String(err)), 500);
+setInterval(() => load().catch(err => status.textContent = String(err)), 500);
 </script>
 </body>
 </html>`;
