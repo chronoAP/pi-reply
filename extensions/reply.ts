@@ -633,9 +633,9 @@ export default function (pi: ExtensionAPI) {
 		scheduleBroadcast(ctx as ExtensionCommandContext, 75);
 	});
 
-	pi.on("message_end", (_event, ctx) => {
+	pi.on("message_end", (event, ctx) => {
 		messageCacheDirty = true;
-		liveMessage = undefined;
+		liveMessage = event.message;
 		scheduleBroadcast(ctx as ExtensionCommandContext, 0);
 	});
 
@@ -649,6 +649,7 @@ export default function (pi: ExtensionAPI) {
 	for (const eventName of ["turn_end", "agent_end", "tool_execution_end", "tool_result", "session_tree"] as const) {
 		pi.on(eventName as any, (_event, ctx) => {
 			messageCacheDirty = true;
+			liveMessage = undefined;
 			agentWorking = false;
 			scheduleBroadcast(ctx as ExtensionCommandContext);
 		});
