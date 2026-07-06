@@ -359,7 +359,8 @@ button:hover { background: var(--selected-bg); }
 button:disabled { color: var(--dim); cursor: not-allowed; background: var(--tool-pending-bg); }
 button.secondary { background: var(--tool-pending-bg); }
 button.danger { background: var(--tool-error-bg); color: var(--error); }
-#add-pop { display: none; position: fixed; z-index: 10; box-shadow: 0 8px 30px #000b; }
+#add-pop, #jump-new { display: none; position: fixed; z-index: 10; box-shadow: 0 8px 30px #000b; }
+#jump-new { right: 434px; bottom: 18px; }
 textarea { box-sizing: border-box; width: 100%; min-height: 74px; background: var(--page-bg); color: var(--text); border: 0; border-radius: 0; padding: 8px; font: inherit; }
 textarea:focus { outline: 1px solid var(--accent); }
 details.msg { white-space: normal; }
@@ -399,6 +400,7 @@ a { color: var(--link); }
   <div id="status" class="hint"></div>
 </aside>
 <button id="add-pop">Add quote</button>
+<button id="jump-new" title="Jump to newest unread">↓</button>
 <script>
 const token = new URLSearchParams(location.search).get('token');
 const chat = document.getElementById('chat');
@@ -407,11 +409,14 @@ const status = document.getElementById('status');
 const working = document.getElementById('working');
 const workingFrame = document.getElementById('working-frame');
 const addPop = document.getElementById('add-pop');
+const jumpNew = document.getElementById('jump-new');
 const sendButton = document.getElementById('send');
 const spinnerFrames = ['⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏'];
 let spinnerIndex = 0;
 let spinnerTimer;
 let items = [];
+let seenLastId;
+let unreadId;
 function updateSendState() {
   const hasUserText = Boolean(document.getElementById('note').value.trim()) || items.some(item => String(item.reply || '').trim());
   sendButton.disabled = !hasUserText;
@@ -497,8 +502,22 @@ function htmlForMessage(m) {
   rendered.set(m.id, { sig, html });
   return html;
 }
+function isAtBottom() {
+  return chat.scrollHeight - chat.scrollTop - chat.clientHeight < 80;
+}
+function updateJumpButton() {
+  if (isAtBottom()) {
+    seenLastId = chat.lastElementChild?.dataset?.id || seenLastId;
+    unreadId = undefined;
+    jumpNew.style.display = 'none';
+    return;
+  }
+  jumpNew.style.display = unreadId ? 'block' : 'none';
+}
 function renderMessages(messages) {
-  const atBottom = chat.scrollHeight - chat.scrollTop - chat.clientHeight < 80;
+  const atBottom = isAtBottom();
+  const newestId = messages.at(-1)?.id;
+  if (!atBottom && seenLastId && newestId && newestId !== seenLastId) unreadId = newestId;
   const openIds = new Set([...chat.querySelectorAll('details[data-id][open]')].map(el => el.dataset.id));
   const keepIds = new Set(messages.map(m => m.id));
   for (const id of rendered.keys()) if (!keepIds.has(id)) rendered.delete(id);
@@ -515,7 +534,11 @@ function renderMessages(messages) {
     current ? current.replaceWith(next) : chat.appendChild(next);
   });
   while (chat.children.length > messages.length) chat.lastElementChild.remove();
-  requestAnimationFrame(() => { if (atBottom) chat.scrollTop = chat.scrollHeight; });
+  requestAnimationFrame(() => {
+    if (atBottom) chat.scrollTop = chat.scrollHeight;
+    if (atBottom) seenLastId = newestId || seenLastId;
+    updateJumpButton();
+  });
 }
 function renderState(data) {
   if (data.title) document.title = data.title;
@@ -558,6 +581,14 @@ chat.addEventListener('keyup', event => {
   if (event.key.startsWith('Arrow') || event.key === 'Shift') requestAnimationFrame(updateAddButton);
 });
 document.addEventListener('mousedown', event => { if (!chat.contains(event.target) && event.target !== addPop) addPop.style.display = 'none'; });
+chat.addEventListener('scroll', updateJumpButton, { passive: true });
+jumpNew.onclick = () => {
+  const target = unreadId ? chat.querySelector('[data-id="' + CSS.escape(unreadId) + '"]') : chat.lastElementChild;
+  target?.scrollIntoView({ block: 'start' });
+  seenLastId = chat.lastElementChild?.dataset?.id || seenLastId;
+  unreadId = undefined;
+  jumpNew.style.display = 'none';
+};
 document.getElementById('refresh').onclick = () => load(true);
 document.getElementById('note').oninput = updateSendState;
 document.addEventListener('focusout', () => setTimeout(() => { if (!isReplyFocused()) flushPendingState(); }, 0));
