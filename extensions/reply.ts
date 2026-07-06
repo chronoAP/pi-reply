@@ -12,8 +12,11 @@ let token = "";
 let latestCtx: ExtensionCommandContext | undefined;
 let latestThemeCss = "";
 let liveMessage: any;
+let cachedMessages: ChatMessage[] = [];
+let messageCacheDirty = true;
 let agentWorking = false;
 let broadcastTimer: ReturnType<typeof setTimeout> | undefined;
+const editDiffCache = new Map<string, string>();
 const eventClients = new Set<ServerResponse>();
 
 type ChatMessage = { id: string; role: string; text: string; label?: string; toolTitle?: string; toolDiff?: string; thinking?: string };
@@ -89,7 +92,10 @@ function numberedLines(prefix: "+" | "-", text: string, startLine?: number): str
 
 function editDiff(args: Record<string, any> = {}, cwd = process.cwd()): string {
 	if (!Array.isArray(args.edits)) return "";
-	return args.edits
+	const cacheKey = JSON.stringify([cwd, args.path, args.edits]);
+	const cached = editDiffCache.get(cacheKey);
+	if (cached !== undefined) return cached;
+	const diff = args.edits
 		.map((edit: { oldText?: string; newText?: string }, index: number) => {
 			const oldText = String(edit.oldText ?? "");
 			const newText = String(edit.newText ?? "");
@@ -99,6 +105,8 @@ function editDiff(args: Record<string, any> = {}, cwd = process.cwd()): string {
 			return `@@ edit ${index + 1}${startLine ? `:${startLine}` : ""} @@\n${oldLines}\n${newLines}`;
 		})
 		.join("\n\n");
+	editDiffCache.set(cacheKey, diff);
+	return diff;
 }
 
 function chatMessageFromAgentMessage(message: { role?: string; content?: unknown }, id: string, label?: string): ChatMessage {
@@ -111,7 +119,7 @@ function chatMessageFromAgentMessage(message: { role?: string; content?: unknown
 	};
 }
 
-function getMessages(ctx: ExtensionCommandContext): ChatMessage[] {
+function rebuildMessages(ctx: ExtensionCommandContext): ChatMessage[] {
 	const branch = ctx.sessionManager.getBranch();
 	const calls = new Map<string, ToolCall>();
 	for (const entry of branch) {
@@ -123,7 +131,7 @@ function getMessages(ctx: ExtensionCommandContext): ChatMessage[] {
 			if (call.type === "toolCall" && call.id) calls.set(call.id, { name: call.name, arguments: call.arguments });
 		}
 	}
-	const messages = branch
+	return branch
 		.filter((entry) => entry.type === "message")
 		.map((entry) => {
 			const message = entry.message as { role?: string; content?: unknown; toolCallId?: string; toolName?: string };
@@ -137,6 +145,14 @@ function getMessages(ctx: ExtensionCommandContext): ChatMessage[] {
 			};
 		})
 		.filter((message) => message.text.trim() || message.thinking?.trim() || message.toolDiff?.trim());
+}
+
+function getMessages(ctx: ExtensionCommandContext): ChatMessage[] {
+	if (messageCacheDirty) {
+		cachedMessages = rebuildMessages(ctx);
+		messageCacheDirty = false;
+	}
+	const messages = [...cachedMessages];
 	if (liveMessage) {
 		const live = chatMessageFromAgentMessage(liveMessage, "__live");
 		const last = messages.at(-1);
@@ -515,6 +531,7 @@ function openUrl(url: string) {
 
 async function ensureServer(pi: ExtensionAPI, ctx: ExtensionCommandContext): Promise<string> {
 	latestCtx = ctx;
+	messageCacheDirty = true;
 	latestThemeCss = themeCss(ctx);
 	if (server && baseUrl) return baseUrl;
 	token = randomBytes(18).toString("hex");
@@ -571,6 +588,7 @@ export default function (pi: ExtensionAPI) {
 
 
 	pi.on("message_start", (event, ctx) => {
+		messageCacheDirty = true;
 		liveMessage = event.message;
 		agentWorking = true;
 		scheduleBroadcast(ctx as ExtensionCommandContext, 0);
@@ -583,18 +601,21 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("message_end", (_event, ctx) => {
+		messageCacheDirty = true;
 		liveMessage = undefined;
 		scheduleBroadcast(ctx as ExtensionCommandContext, 0);
 	});
 
 	for (const eventName of ["turn_start", "agent_start", "tool_execution_start", "tool_execution_update", "tool_call"] as const) {
 		pi.on(eventName as any, (_event, ctx) => {
+			if (eventName !== "tool_execution_update") messageCacheDirty = true;
 			agentWorking = true;
 			scheduleBroadcast(ctx as ExtensionCommandContext);
 		});
 	}
 	for (const eventName of ["turn_end", "agent_end", "tool_execution_end", "tool_result", "session_tree"] as const) {
 		pi.on(eventName as any, (_event, ctx) => {
+			messageCacheDirty = true;
 			agentWorking = false;
 			scheduleBroadcast(ctx as ExtensionCommandContext);
 		});
