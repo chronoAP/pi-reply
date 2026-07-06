@@ -1,6 +1,6 @@
 {
   "name": "pi-reply",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Browser reply workspace for quoting and steering Pi chats",
   "type": "module",
   "keywords": [

@@ -159,13 +159,13 @@ function rebuildMessages(ctx: ExtensionCommandContext): ChatMessage[] {
 
 function conversationTitle(ctx: ExtensionCommandContext): string {
 	const named = ctx.sessionManager.getSessionName?.();
-	if (named) return `Pi Reply — ${named}`;
+	if (named) return named;
 	const firstUser = ctx.sessionManager.getBranch().find((entry) => {
 		if (entry.type !== "message") return false;
 		return (entry.message as { role?: string }).role === "user";
 	}) as { message?: { content?: unknown } } | undefined;
 	const text = textFromContent(firstUser?.message?.content).replace(/\s+/g, " ").trim();
-	return `Pi Reply — ${text ? text.slice(0, 60) : ctx.sessionManager.getSessionId().slice(0, 8)}`;
+	return text ? text.slice(0, 60) : ctx.sessionManager.getSessionId().slice(0, 8);
 }
 
 function getMessages(ctx: ExtensionCommandContext): ChatMessage[] {
