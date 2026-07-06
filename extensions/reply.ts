@@ -147,6 +147,17 @@ function rebuildMessages(ctx: ExtensionCommandContext): ChatMessage[] {
 		.filter((message) => message.text.trim() || message.thinking?.trim() || message.toolDiff?.trim());
 }
 
+function conversationTitle(ctx: ExtensionCommandContext): string {
+	const named = ctx.sessionManager.getSessionName?.();
+	if (named) return `Pi Reply — ${named}`;
+	const firstUser = ctx.sessionManager.getBranch().find((entry) => {
+		if (entry.type !== "message") return false;
+		return (entry.message as { role?: string }).role === "user";
+	}) as { message?: { content?: unknown } } | undefined;
+	const text = textFromContent(firstUser?.message?.content).replace(/\s+/g, " ").trim();
+	return `Pi Reply — ${text ? text.slice(0, 60) : ctx.sessionManager.getSessionId().slice(0, 8)}`;
+}
+
 function getMessages(ctx: ExtensionCommandContext): ChatMessage[] {
 	if (messageCacheDirty) {
 		cachedMessages = rebuildMessages(ctx);
@@ -229,9 +240,13 @@ function themeExportColors(ctx: ExtensionCommandContext): { pageBg?: string; car
 	}
 }
 
+function browserState(ctx: ExtensionCommandContext) {
+	return { ok: true, title: conversationTitle(ctx), messages: getMessages(ctx), working: agentWorking };
+}
+
 function broadcastMessages() {
 	if (!latestCtx) return;
-	const payload = `event: messages\ndata: ${JSON.stringify({ ok: true, messages: getMessages(latestCtx), working: agentWorking })}\n\n`;
+	const payload = `event: messages\ndata: ${JSON.stringify(browserState(latestCtx))}\n\n`;
 	for (const client of [...eventClients]) client.write(payload);
 }
 
@@ -317,7 +332,7 @@ function appHtml() {
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Pi Reply</title>
+<title>${latestCtx ? conversationTitle(latestCtx) : "Pi Reply"}</title>
 <style>
 :root { color-scheme: dark; font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace; font-size: 14px; font-variant-ligatures: none; ${latestThemeCss} background: var(--page-bg); color: var(--text); }
 body { margin: 0; display: grid; grid-template-columns: minmax(0, 1fr) 420px; height: 100vh; background: var(--page-bg); }
@@ -479,11 +494,14 @@ function renderMessages(messages) {
   while (chat.children.length > messages.length) chat.lastElementChild.remove();
   requestAnimationFrame(() => { if (atBottom) chat.scrollTop = chat.scrollHeight; });
 }
-async function load() {
-  const res = await fetch('/api/messages?token=' + encodeURIComponent(token));
-  const data = await res.json();
+function applyState(data) {
+  if (data.title) document.title = data.title;
   setWorking(Boolean(data.working));
   renderMessages(data.messages || []);
+}
+async function load() {
+  const res = await fetch('/api/messages?token=' + encodeURIComponent(token));
+  applyState(await res.json());
 }
 function addSelection() {
   const quote = String(getSelection()).trim();
@@ -529,11 +547,7 @@ document.getElementById('send').onclick = async () => {
 };
 load().catch(err => status.textContent = String(err));
 const events = new EventSource('/api/events?token=' + encodeURIComponent(token));
-events.addEventListener('messages', event => {
-  const data = JSON.parse(event.data);
-  setWorking(Boolean(data.working));
-  renderMessages(data.messages || []);
-});
+events.addEventListener('messages', event => applyState(JSON.parse(event.data)));
 events.onerror = () => setTimeout(() => load().catch(err => status.textContent = String(err)), 500);
 setInterval(() => load().catch(err => status.textContent = String(err)), 500);
 </script>
@@ -567,10 +581,10 @@ async function ensureServer(pi: ExtensionAPI, ctx: ExtensionCommandContext): Pro
 				});
 				eventClients.add(res);
 				req.on("close", () => eventClients.delete(res));
-				res.write(`event: messages\ndata: ${JSON.stringify({ ok: true, messages: latestCtx ? getMessages(latestCtx) : [], working: agentWorking })}\n\n`);
+				res.write(`event: messages\ndata: ${JSON.stringify(latestCtx ? browserState(latestCtx) : { ok: true, title: "Pi Reply", messages: [], working: agentWorking })}\n\n`);
 				return;
 			}
-			if (url.pathname === "/api/messages") return sendJson(res, 200, { ok: true, messages: latestCtx ? getMessages(latestCtx) : [], working: agentWorking });
+			if (url.pathname === "/api/messages") return sendJson(res, 200, latestCtx ? browserState(latestCtx) : { ok: true, title: "Pi Reply", messages: [], working: agentWorking });
 			if (url.pathname === "/api/send" && req.method === "POST") {
 				const body = await readJson(req);
 				const text = formatQuoteReply(body.items ?? [], body.note ?? "");
