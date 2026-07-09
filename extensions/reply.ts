@@ -17,7 +17,7 @@ let messageCacheDirty = true;
 let agentWorking = false;
 let broadcastTimer: ReturnType<typeof setTimeout> | undefined;
 const editDiffCache = new Map<string, string>();
-const eventClients = new Set<ServerResponse>();
+const eventClients = new Map<ServerResponse, ReturnType<typeof setInterval>>();
 
 type ChatMessage = { id: string; role: string; text: string; label?: string; toolTitle?: string; toolDiff?: string; thinking?: string; toolCalls?: ToolCall[]; live?: boolean };
 type ToolCall = { name?: string; arguments?: Record<string, any> };
@@ -186,7 +186,7 @@ async function readJson(req: IncomingMessage): Promise<any> {
 	const chunks: Buffer[] = [];
 	for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
 	const body = Buffer.concat(chunks).toString("utf8");
-	return body ? JSON.parse(body) : {};
+	try { return body ? JSON.parse(body) : {}; } catch { return {}; }
 }
 
 function sendJson(res: ServerResponse, status: number, value: unknown) {
@@ -254,10 +254,27 @@ function browserState(ctx: ExtensionCommandContext) {
 	return { ok: true, title: conversationTitle(ctx), messages: getMessages(ctx), working: agentWorking };
 }
 
+function closeEventClient(client: ServerResponse) {
+	const heartbeat = eventClients.get(client);
+	if (!heartbeat) return;
+	clearInterval(heartbeat);
+	eventClients.delete(client);
+	try { client.end(); } catch { /* already closed */ }
+}
+
+function writeSse(client: ServerResponse, payload: string) {
+	try {
+		if (client.destroyed || client.writableEnded) return closeEventClient(client);
+		client.write(payload);
+	} catch {
+		closeEventClient(client);
+	}
+}
+
 function broadcastMessages() {
 	if (!latestCtx) return;
 	const payload = `event: messages\ndata: ${JSON.stringify(browserState(latestCtx))}\n\n`;
-	for (const client of [...eventClients]) client.write(payload);
+	for (const client of eventClients.keys()) writeSse(client, payload);
 }
 
 function scheduleBroadcast(ctx?: ExtensionCommandContext, delayMs = 75) {
@@ -652,9 +669,10 @@ async function ensureServer(pi: ExtensionAPI, ctx: ExtensionCommandContext): Pro
 					"cache-control": "no-cache, no-transform",
 					connection: "keep-alive",
 				});
-				eventClients.add(res);
-				req.on("close", () => eventClients.delete(res));
-				res.write(`event: messages\ndata: ${JSON.stringify(latestCtx ? browserState(latestCtx) : { ok: true, title: "Pi Reply", messages: [], working: agentWorking })}\n\n`);
+				const heartbeat = setInterval(() => writeSse(res, `: keepalive\n\n`), 15000);
+				eventClients.set(res, heartbeat);
+				req.on("close", () => closeEventClient(res));
+				writeSse(res, `retry: 1000\nevent: messages\ndata: ${JSON.stringify(latestCtx ? browserState(latestCtx) : { ok: true, title: "Pi Reply", messages: [], working: agentWorking })}\n\n`);
 				return;
 			}
 			if (url.pathname === "/api/messages") return sendJson(res, 200, latestCtx ? browserState(latestCtx) : { ok: true, title: "Pi Reply", messages: [], working: agentWorking });
@@ -713,14 +731,14 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	for (const eventName of ["turn_start", "agent_start", "tool_execution_start", "tool_execution_update", "tool_call"] as const) {
-		pi.on(eventName as any, (_event, ctx) => {
+		(pi as any).on(eventName, (_event: unknown, ctx: ExtensionCommandContext) => {
 			if (eventName !== "tool_execution_update") messageCacheDirty = true;
 			agentWorking = true;
 			scheduleBroadcast(ctx as ExtensionCommandContext);
 		});
 	}
 	for (const eventName of ["turn_end", "agent_end", "tool_execution_end", "tool_result", "session_tree"] as const) {
-		pi.on(eventName as any, (_event, ctx) => {
+		(pi as any).on(eventName, (_event: unknown, ctx: ExtensionCommandContext) => {
 			messageCacheDirty = true;
 			liveMessage = undefined;
 			agentWorking = false;
@@ -729,7 +747,7 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	pi.on("session_shutdown", () => {
-		for (const client of eventClients) client.end();
+		for (const client of eventClients.keys()) closeEventClient(client);
 		eventClients.clear();
 		server?.close();
 		server = undefined;

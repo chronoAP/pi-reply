@@ -1,7 +1,7 @@
 {
   "name": "pi-reply",
-  "version": "0.1.2",
-  "description": "Browser reply workspace for quoting and steering Pi chats",
+  "version": "0.2.0",
+  "description": "Small browser reply workspace for quoting and steering Pi chats",
   "type": "module",
   "keywords": [
     "pi-package",
@@ -21,6 +21,11 @@
   "homepage": "https://github.com/chronoAP/pi-reply#readme",
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.0.0"
   },
   "pi": {
     "extensions": [
